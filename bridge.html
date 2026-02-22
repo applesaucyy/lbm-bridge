@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>LBM Bridge v3.1</title>
+</head>
+<body>
+    <script>
+        // Updated endpoint name
+        const UPLOAD_ENDPOINT = "api.php";
+
+        window.addEventListener('message', function(event) {
+            const data = event.data;
+            if (!data.type) return;
+
+            // --- MODE 1: TOKEN GENERATION (SETUP) ---
+            if (data.type === 'TOKENIZE') {
+                const formData = new FormData();
+                formData.append('action', 'tokenize');
+                formData.append('raw_key', data.rawKey);
+                formData.append('admin_pass', data.adminPass);
+
+                fetch(UPLOAD_ENDPOINT, { method: 'POST', body: formData })
+                .then(r => r.json())
+                .then(json => {
+                    event.source.postMessage({ type: 'TOKEN_RESULT', success: (json.result === 'success'), token: json.token }, event.origin);
+                })
+                .catch(err => {
+                    event.source.postMessage({ type: 'TOKEN_RESULT', success: false, message: "Connection Failed" }, event.origin);
+                });
+            }
+
+            // --- MODE 2: UPLOAD (RUNTIME) ---
+            if (data.type === 'UPLOAD') {
+                console.log("[Bridge] Starting upload...");
+
+                const formData = new FormData();
+                formData.append('action', 'upload');
+                formData.append('auth_token', data.authToken);
+                
+                if (data.passwordCheck) {
+                    formData.append('password_check', data.passwordCheck);
+                }
+                
+                // 1. Add Main File
+                if (data.fileContent && data.filename) {
+                    const blob = new Blob([data.fileContent], { type: 'text/javascript' });
+                    formData.append('upload_file', blob, data.filename);
+                    formData.append('upload_name', data.filename);
+                }
+                
+                // 2. Add Media File
+                if (data.mediaFile && data.mediaName) {
+                    const cleanBlob = new Blob([data.mediaFile], { type: data.mediaFile.type || 'application/octet-stream' });
+                    formData.append('media_file', cleanBlob, data.mediaName); 
+                    formData.append('media_name', data.mediaName);
+                }
+
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', UPLOAD_ENDPOINT, true);
+                xhr.withCredentials = false;
+                
+                xhr.onload = function() {
+                    let res = null;
+                    try { res = JSON.parse(xhr.responseText); } catch(e) {}
+
+                    if (xhr.status >= 200 && xhr.status < 300) {
+                        event.source.postMessage({
+                            type: 'UPLOAD_RESULT',
+                            success: (res && res.result === 'success'),
+                            message: res ? (res.message || res.error_type) : "Invalid JSON"
+                        }, event.origin);
+                    } else {
+                        event.source.postMessage({
+                            type: 'UPLOAD_RESULT',
+                            success: false,
+                            message: res ? res.message : `HTTP ${xhr.status}`
+                        }, event.origin);
+                    }
+                };
+
+                xhr.onerror = function() {
+                    event.source.postMessage({ type: 'UPLOAD_RESULT', success: false, message: "Network Error" }, event.origin);
+                };
+
+                xhr.send(formData);
+            }
+        });
+    </script>
+</body>
+</html>
